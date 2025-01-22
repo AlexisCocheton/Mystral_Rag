@@ -1,9 +1,6 @@
 import os
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 from datasets import load_dataset
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import HuggingFacePipeline
 from transformers import pipeline
 from huggingface_hub import login
 from accelerate import Accelerator
@@ -11,6 +8,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 from datasets import load_dataset
 
 def fine_tune_model(tokenizer, model):
+    # Path to save/load the fine-tuned model
+    fine_tuned_model_path = "./mistral-fine-tuned"
+
+    # Check if the fine-tuned model already exists
+    if os.path.exists(fine_tuned_model_path):
+        print(f"Fine-tuned model found at {fine_tuned_model_path}. Loading the model...")
+        return AutoModelForCausalLM.from_pretrained(fine_tuned_model_path)
+    
     # Ensure pad_token is set
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token  # Use eos_token as pad_token
@@ -54,5 +59,5 @@ def fine_tune_model(tokenizer, model):
 
     # Fine-tune the model
     trainer.train()
-    trainer.save_model("./mistral-fine-tuned")
+    trainer.save_model(fine_tuned_model_path)
     print("Model fine-tuned and saved!")
