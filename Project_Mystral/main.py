@@ -12,21 +12,28 @@ from rag import setup_rag_pipeline
 
 # Set Hugging Face API token
 token = os.getenv("HF_AUTH_TOKEN")
+print(f"User Query: {token}")
 os.environ["HF_HOME"] = "C:/Users/Lenovo/.cache/huggingface"
 login(token)
+print(f"login pass:")
 
-model_name = "mistralai/mistral-7b-v0.1"
+model_name = "gpt2" # mistralai/mistral-7b-v0.1
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
-
+print(f"tokenizer pass:")
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    device_map="auto",
+    low_cpu_mem_usage=True
+)
+print(f"model pass:")
 
 # MAIN FUNCTION
 if __name__ == "__main__":
     # Fine-tune the model
-    fine_tune_model()
+    fine_tune_model(tokenizer,model)
 
     # Set up RAG pipeline
-    rag_pipeline = setup_rag_pipeline()
+    rag_pipeline = setup_rag_pipeline(tokenizer,model_name)
 
     # Test the RAG pipeline
     user_query = "What is Python?"
