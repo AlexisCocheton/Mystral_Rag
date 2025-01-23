@@ -1,15 +1,12 @@
 import os
-from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+from transformers import AutoModelForCausalLM, Trainer, TrainingArguments
 from datasets import load_dataset
-from transformers import pipeline
-from huggingface_hub import login
-from accelerate import Accelerator
-from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
-from datasets import load_dataset
+
 
 def fine_tune_model(tokenizer, model):
     # Path to save/load the fine-tuned model
-    fine_tuned_model_path = "./mistral-fine-tuned"
+    fine_tuned_model_path = "./gpt-fine-tuned"
+    
 
     # Check if the fine-tuned model already exists
     if os.path.exists(fine_tuned_model_path):
