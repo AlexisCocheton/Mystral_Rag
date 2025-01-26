@@ -1,4 +1,5 @@
 import os
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from huggingface_hub import login
 from rag import setup_rag_pipeline
@@ -12,24 +13,24 @@ os.environ["HF_HOME"] = "C:/Users/Lenovo/.cache/huggingface"
 login(token)
 print("Login successful.")
 
-model_name = "gpt2"  # Use GPT-2 or a fine-tuned version
+print("cuda" if torch.cuda.is_available() else "cpu")
+
+model_name = "gpt2"  
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    device_map="auto",
+    device_map="cuda" if torch.cuda.is_available() else "cpu",
     low_cpu_mem_usage=True
 )
 
 if __name__ == "__main__":
-    # Fine-tune the model (if needed)
-    fine_tuned_model = fine_tune_model(tokenizer, model)
-    
-    # Set up the RAG pipeline
-    rag_pipeline = setup_rag_pipeline(tokenizer)
-
-    # Test the RAG pipeline
-    user_query = "tell me the documents you got in the RAG pipeline"
-    cleaned_answer = rag_pipeline(user_query)
-
-    print(f"Question: {user_query}")
-    print(f"Cleaned Answer: {cleaned_answer}")
+    try:
+        fine_tuned_model = fine_tune_model(tokenizer, model, train_new=False)
+        if fine_tuned_model is None:
+            raise ValueError("Fine-tuning failed.")
+        
+        question = input("Enter your question: ")  # Dynamic input
+        rag_pipeline = setup_rag_pipeline(question=question)
+        print(rag_pipeline)
+    except Exception as e:
+        print(f"An error occurred: {e}")
