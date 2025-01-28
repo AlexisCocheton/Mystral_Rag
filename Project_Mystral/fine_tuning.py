@@ -1,11 +1,10 @@
 import os
 from transformers import AutoModelForCausalLM, Trainer, TrainingArguments
 from datasets import load_dataset
+from peft import LoraConfig, get_peft_model
 
-
-def fine_tune_model(tokenizer, model, dataset_name="wikitext", dataset_config="wikitext-2-raw-v1", save_path="GPT-wiki-fine-tuned", train_new=False, dataset_size="train[:10%]", eval_size="validation[:10%]"):
-    """
-    Fine-tune a causal language model or load an existing one.
+"""
+    Fine-tune a causal language model using LoRA or load an existing one.
     Args:
         tokenizer: Pretrained tokenizer compatible with the model.
         model: Pretrained causal language model to fine-tune.
@@ -15,54 +14,32 @@ def fine_tune_model(tokenizer, model, dataset_name="wikitext", dataset_config="w
         train_new: If True, train a new model; otherwise, load the existing fine-tuned model if it exists.
         dataset_size: The size of the dataset to use for training (default: "train[:10%]").
         eval_size: The size of the dataset to use for evaluation (default: "validation[:10%]").
+"""
+
+def fine_tune_model(tokenizer, model, dataset_name="wikitext", dataset_config="wikitext-2-raw-v1", save_path="mistral-7b-fine-tuned", train_new=False):
     """
-    test_context = """
-    Python is a high-level, interpreted programming language known for its simplicity and readability. It was created by Guido van Rossum and first released in 1991.
-
-    Python supports multiple programming paradigms, including procedural, object-oriented, and functional programming. It is dynamically typed and garbage-collected.
-
-    Python's syntax is designed to be easy to read and write, making it a popular choice for beginners and experienced developers alike.
-
-    Python is widely used in data science, machine learning, web development, automation, and scientific computing. Libraries like NumPy, Pandas, and TensorFlow are commonly used in these fields.
-
-    Python has a large standard library that provides modules and functions for tasks like file I/O, regular expressions, and web development.
+    Fine-tune Mistral-7B with LoRA for speed (not accuracy).
     """
-
-    test_prompt = """
-    You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise.
-
-    Context:
-    {context}
-
-    Question: What is Python?
-    Answer:
-    """.format(context=test_context)
-
-    # Generate answer
-    test_output = fine_tuned_pipeline(test_prompt)
-    print("Test Output:", test_output)
-    
     # Check if the fine-tuned model already exists
     if not train_new and os.path.exists(save_path):
         print(f"Fine-tuned model found at {save_path}. Loading the model...")
-        return AutoModelForCausalLM.from_pretrained(save_path)
+        return model
 
     # Ensure pad_token is set
     tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
 
-    # Load dataset
+    # Load a tiny subset of the dataset
     try:
-        # Load dataset with configurable size
-        dataset = load_dataset(dataset_name, dataset_config, split=dataset_size)
-        eval_dataset = load_dataset(dataset_name, dataset_config, split=eval_size)
+        dataset = load_dataset(dataset_name, dataset_config, split="train[:1%]")  # Use only 1% of the dataset
+        eval_dataset = load_dataset(dataset_name, dataset_config, split="validation[:1%]")
     except Exception as e:
         print(f"Error loading dataset: {e}")
         return None
 
-    # Tokenize the dataset
+    # Tokenize the dataset with a shorter sequence length
     def tokenize_function(examples):
         tokenized = tokenizer(
-            examples["text"], truncation=True, padding="max_length", max_length=512
+            examples["text"], truncation=True, padding="max_length", max_length=128  # Short sequence length
         )
         tokenized["labels"] = tokenized["input_ids"].copy()
         return tokenized
@@ -70,36 +47,49 @@ def fine_tune_model(tokenizer, model, dataset_name="wikitext", dataset_config="w
     tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=dataset.column_names)
     tokenized_eval_dataset = eval_dataset.map(tokenize_function, batched=True, remove_columns=eval_dataset.column_names)
 
-    # Training arguments
+    # Add LoRA configuration with a very small rank
+    lora_config = LoraConfig(
+        r=2,  # Very small rank for speed
+        lora_alpha=4,  # 2 * r
+        target_modules=["q_proj", "v_proj"],  # Mistral-7B attention layers
+        lora_dropout=0.1,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()  # Debug: Verify LoRA setup
+
+    # Training arguments optimized for speed
     training_args = TrainingArguments(
-        output_dir=save_path,
-        eval_strategy="steps", #FutureWarning: `evaluation_strategy` is deprecated and will be removed in version 4.46 of 🤗 Transformers. Use `eval_strategy` instead
-        eval_steps=100,
-        logging_steps=50,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        num_train_epochs=3,
-        save_steps=500,
-        save_total_limit=2,
-        push_to_hub=False,
+        output_dir=save_path,  # Directory to save the model
+        per_device_train_batch_size=1,  # Small batch size for speed
+        per_device_eval_batch_size=1,  # Same as train batch size
+        gradient_accumulation_steps=1,  # No gradient accumulation for speed
+        max_steps=100,  # Train for only 100 steps (fraction of an epoch)
+        eval_strategy="no",  # Disable evaluation
+        logging_steps=10,  # Log metrics every 10 steps
+        learning_rate=5e-5,  # Learning rate for LoRA
+        weight_decay=0.01,  # Regularization to prevent overfitting
+        warmup_steps=10,  # Short warmup for learning rate scheduler
+        save_steps=100,  # Save checkpoint every 100 steps
+        save_total_limit=1,  # Keep only 1 checkpoint
+        fp16=True,  # Use mixed precision (FP16)
+        push_to_hub=False,  # Set to True if pushing to Hugging Face Hub
     )
 
-
-    
     # Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset,
         eval_dataset=tokenized_eval_dataset,
-        processing_class=tokenizer, 
     )
 
     # Fine-tune the model
     try:
         print("Starting model fine-tuning...")
         trainer.train()
-        trainer.save_model(save_path)
+        trainer.model.save_pretrained(save_path)  # Save only the adapter
         print(f"Model fine-tuned and saved to {save_path}!")
         return model
     except Exception as e:
